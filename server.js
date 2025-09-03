@@ -62,7 +62,12 @@ app.get('/health', async (req, res) => {
       version: '1.0.0',
       database: 'disconnected',
       error: error.message,
-      environment: process.env.NODE_ENV || 'development'
+      environment: process.env.NODE_ENV || 'development',
+      debug: {
+        hasDatabaseUrl: !!process.env.DATABASE_URL,
+        hasDirectUrl: !!process.env.DIRECT_URL,
+        databaseUrlPrefix: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 20) + '...' : 'missing'
+      }
     });
   }
 });
