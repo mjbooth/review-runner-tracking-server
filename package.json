@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "echo 'No build step needed'",
-    "vercel-build": "echo 'No build step needed'"
+    "build": "prisma generate",
+    "vercel-build": "prisma generate",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.7.0",
