@@ -40,19 +40,40 @@ app.use(compression());
 app.use(express.json({ limit: '1mb' }));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(),
-    service: 'review-runner-tracking',
-    version: '1.0.0'
-  });
+app.get('/health', async (req, res) => {
+  try {
+    // Test database connection
+    await prisma.$queryRaw`SELECT 1`;
+    
+    res.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      service: 'review-runner-tracking',
+      version: '1.0.0',
+      database: 'connected',
+      environment: process.env.NODE_ENV || 'development'
+    });
+  } catch (error) {
+    logger.error('Health check failed', { error: error.message });
+    res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      service: 'review-runner-tracking',
+      version: '1.0.0',
+      database: 'disconnected',
+      error: error.message,
+      environment: process.env.NODE_ENV || 'development'
+    });
+  }
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Review Runner Tracking Server',
+    status: 'online',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
     endpoints: {
       health: '/health',
       track: '/:uuid'
