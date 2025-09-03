@@ -265,7 +265,6 @@ app.get('/:uuid', async (req, res) => {
     });
 
     // For fastest redirect, check if user agent indicates a bot/crawler
-    const userAgent = req.get('User-Agent') || '';
     const isBot = /bot|crawler|spider|crawling/i.test(userAgent);
     
     // For bots or if query param requests instant redirect, skip the loading page
@@ -405,6 +404,16 @@ function generateErrorPage(title, message, submessage) {
 
 // Generate HTML redirect page with tracking
 function generateRedirectPage(businessName, redirectUrl, customerName, isFirstClick) {
+  // Safely extract origin for preconnect/dns-prefetch
+  let origin = '';
+  try {
+    origin = new URL(redirectUrl).origin;
+  } catch (e) {
+    // If URL parsing fails, just use the domain part
+    const match = redirectUrl.match(/https?:\/\/([^\/]+)/);
+    origin = match ? `${redirectUrl.split('/')[0]}//${match[1]}` : '';
+  }
+
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -413,8 +422,8 @@ function generateRedirectPage(businessName, redirectUrl, customerName, isFirstCl
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>Redirecting to ${businessName} Reviews</title>
       <meta http-equiv="refresh" content="0.5;url=${redirectUrl}">
-      <link rel="preconnect" href="${new URL(redirectUrl).origin}">
-      <link rel="dns-prefetch" href="${new URL(redirectUrl).origin}">
+      ${origin ? `<link rel="preconnect" href="${origin}">` : ''}
+      ${origin ? `<link rel="dns-prefetch" href="${origin}">` : ''}
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
