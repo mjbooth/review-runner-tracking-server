@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Business {
+  id                  String              @id @default(uuid())
+  clerk_user_id       String              @unique
+  name                String
+  email               String
+  phone               String?
+  address             String?
+  website             String?
+  google_place_id     String?
+  google_place_name   String?
+  google_review_url   String?
+  google_maps_url     String?
+  google_rating       Float?
+  google_review_count Int?
+  google_types        String[]            @default([])
+  google_phone_number String?
+  google_website      String?
+  google_photos       Json?
+  last_synced_at      DateTime?
+  timezone            String              @default("Europe/London")
+  sms_credits_used    Int                 @default(0)
+  sms_credits_limit   Int                 @default(1000)
+  email_credits_used  Int                 @default(0)
+  email_credits_limit Int                 @default(5000)
+  is_active           Boolean             @default(true)
+  created_at          DateTime            @default(now())
+  updated_at          DateTime
+  customers           Customer[]
+  events              Event[]
+  message_templates   message_templates[]
+  review_requests     ReviewRequest[]
+  suppressions        Suppression[]
+  users               users[]
+
+  @@map("businesses")
+}
+
+model Customer {
+  id              String          @id @default(uuid())
+  business_id     String
+  first_name      String
+  last_name       String?
+  email           String?
+  phone           String?
+  address         String?
+  notes           String?
+  tags            String[]        @default([])
+  last_contact    DateTime?
+  is_active       Boolean         @default(true)
+  created_at      DateTime        @default(now())
+  updated_at      DateTime
+  businesses      Business        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  review_requests ReviewRequest[]
+
+  @@index([business_id])
+  @@index([email])
+  @@index([phone])
+  @@map("customers")
+}
+
+model ReviewRequest {
+  id                   String             @id @default(uuid())
+  business_id          String
+  customer_id          String
+  template_id          String?
+  channel              RequestChannel
+  status               RequestStatus      @default(DRAFT)
+  subject              String?
+  message_content      String
+  personalized_message String?
+  review_url           String
+  tracking_url         String             @unique
+  tracking_uuid        String             @unique
+  scheduled_for        DateTime?
+  sent_at              DateTime?
+  delivered_at         DateTime?
+  clicked_at           DateTime?
+  completed_at         DateTime?
+  external_id          String?
+  error_message        String?
+  retry_count          Int                @default(0)
+  delivery_status      Json?
+  click_metadata       Json?
+  metadata             Json?
+  is_active            Boolean            @default(true)
+  created_at           DateTime           @default(now())
+  updated_at           DateTime
+  events               Event[]
+  businesses           Business           @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  customers            Customer           @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  message_templates    message_templates? @relation(fields: [template_id], references: [id])
+
+  @@index([status])
+  @@index([business_id])
+  @@index([created_at])
+  @@index([customer_id])
+  @@index([scheduled_for])
+  @@index([template_id])
+  @@index([tracking_uuid])
+  @@map("review_requests")
+}
+
+model Event {
+  id                String         @id @default(uuid())
+  business_id       String
+  review_request_id String?
+  type              EventType
+  source            String
+  description       String
+  metadata          Json?
+  ip_address        String?
+  user_agent        String?
+  created_at        DateTime       @default(now())
+  businesses        Business       @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  review_requests   ReviewRequest? @relation(fields: [review_request_id], references: [id])
+
+  @@index([type])
+  @@index([business_id])
+  @@index([created_at])
+  @@index([review_request_id])
+  @@map("events")
+}
+
+model Suppression {
+  id          String            @id @default(uuid())
+  business_id String
+  contact     String
+  channel     RequestChannel?
+  reason      SuppressionReason
+  source      String
+  notes       String?
+  expires_at  DateTime?
+  is_active   Boolean           @default(true)
+  created_at  DateTime          @default(now())
+  updated_at  DateTime
+  businesses  Business          @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, contact, channel])
+  @@index([contact])
+  @@index([business_id])
+  @@index([channel])
+  @@map("suppressions")
+}
+
+model message_templates {
+  id              String           @id
+  business_id     String?
+  name            String
+  description     String?
+  category        TemplateCategory @default(GENERAL)
+  channel         RequestChannel
+  subject         String?
+  content         String
+  variables       String[]         @default([])
+  template_type   String           @default("business")
+  is_active       Boolean          @default(true)
+  usage_count     Int              @default(0)
+  last_used_at    DateTime?
+  created_at      DateTime         @default(now())
+  updated_at      DateTime
+  businesses      Business?        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  review_requests ReviewRequest[]
+
+  @@index([business_id])
+  @@index([category])
+  @@index([channel])
+  @@index([is_active])
+  @@index([template_type])
+}
+
+model users {
+  id                         String           @id
+  clerk_user_id              String           @unique
+  business_id                String?
+  email                      String           @unique
+  first_name                 String?
+  last_name                  String?
+  image_url                  String?
+  onboarding_status          OnboardingStatus @default(PENDING)
+  onboarding_step            Int              @default(0)
+  onboarding_completed_steps Json             @default("[]")
+  onboarding_completed_at    DateTime?
+  notification_preferences   Json?
+  ui_preferences             Json?
+  last_active_at             DateTime?
+  created_at                 DateTime         @default(now())
+  updated_at                 DateTime
+  businesses                 Business?        @relation(fields: [business_id], references: [id])
+
+  @@index([business_id])
+  @@index([clerk_user_id])
+  @@index([email])
+}
+
+enum EventType {
+  REQUEST_CREATED
+  REQUEST_QUEUED
+  REQUEST_SENT
+  REQUEST_DELIVERED
+  REQUEST_BOUNCED
+  REQUEST_FAILED
+  REQUEST_CLICKED
+  REQUEST_COMPLETED
+  REQUEST_OPTED_OUT
+  FOLLOWUP_SENT
+  CAMPAIGN_CREATED
+  CAMPAIGN_LAUNCHED
+  CAMPAIGN_COMPLETED
+  CAMPAIGN_FAILED
+  TEMPLATE_USED
+  WEBHOOK_RECEIVED
+  SUPPRESSION_ADDED
+  ERROR_OCCURRED
+}
+
+enum OnboardingStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+enum RequestChannel {
+  SMS
+  EMAIL
+}
+
+enum RequestStatus {
+  DRAFT
+  QUEUED
+  SENT
+  DELIVERED
+  CLICKED
+  COMPLETED
+  BOUNCED
+  FAILED
+  OPTED_OUT
+}
+
+enum SuppressionReason {
+  SMS_STOP
+  EMAIL_UNSUBSCRIBE
+  EMAIL_BOUNCE
+  EMAIL_SPAM_COMPLAINT
+  MANUAL
+  GDPR_REQUEST
+}
+
+enum TemplateCategory {
+  GENERAL
+  RESTAURANT
+  RETAIL
+  HEALTHCARE
+  SERVICE
+  CUSTOM
+}
