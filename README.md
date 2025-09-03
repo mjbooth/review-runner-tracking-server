@@ -6,6 +6,8 @@ A lightweight Express.js microservice that handles review request tracking URLs 
 
 This tracking server provides public URL access at `track.domain.com/uuid123` to handle customer review link clicks, record analytics, and redirect users to review platforms - all without requiring authentication.
 
+Designed as a lightweight microservice to bypass Clerk middleware restrictions in the main Next.js application.
+
 ## ✨ Features
 
 - **Public Access** - No authentication required, bypasses Clerk middleware
