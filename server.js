@@ -163,86 +163,98 @@ app.get('/:uuid', async (req, res) => {
     // Track the click if not already clicked
     const isFirstClick = !reviewRequest.clicked_at;
     
-    if (isFirstClick) {
-      await prisma.$transaction(async (tx) => {
-        // Update review request with click information
-        await tx.reviewRequest.update({
-          where: { id: reviewRequest.id },
-          data: {
-            clicked_at: new Date(),
-            status: 'CLICKED',
-            click_metadata: {
-              userAgent,
-              ipAddress,
-              referer,
-              timestamp: new Date().toISOString(),
-              trackingServer: true,
-              responseTime: Date.now() - startTime
-            },
-          },
-        });
-
-        // Create click event
-        await tx.event.create({
-          data: {
-            business_id: reviewRequest.business_id,
-            review_request_id: reviewRequest.id,
-            type: 'REQUEST_CLICKED',
-            source: 'tracking_server',
-            description: `Review link clicked by ${reviewRequest.customers.first_name} ${reviewRequest.customers.last_name}`,
-            metadata: {
-              trackingUuid: uuid,
-              customerEmail: reviewRequest.customers.email,
-              userAgent,
-              ipAddress,
-              referer,
-              trackingServer: true,
-              isFirstClick: true
-            },
-          },
-        });
-      });
-
-      logger.info('✅ First click tracked successfully', {
-        requestId: reviewRequest.id,
-        customerId: reviewRequest.customer_id,
-        businessId: reviewRequest.business_id,
-        responseTime: Date.now() - startTime
-      });
-    } else {
-      // Log repeat click
-      logger.info('🔄 Repeat click detected', {
-        requestId: reviewRequest.id,
-        previousClickAt: reviewRequest.clicked_at,
-      });
-
-      // Still create an event for repeat clicks
-      await prisma.event.create({
-        data: {
-          business_id: reviewRequest.business_id,
-          review_request_id: reviewRequest.id,
-          type: 'REQUEST_CLICKED',
-          source: 'tracking_server',
-          description: `Repeat click by ${reviewRequest.customers.first_name} ${reviewRequest.customers.last_name}`,
-          metadata: {
-            trackingUuid: uuid,
-            repeatClick: true,
-            previousClickAt: reviewRequest.clicked_at,
-            userAgent,
-            ipAddress,
-            referer,
-            trackingServer: true,
-            isFirstClick: false
-          },
-        },
-      });
-    }
-
-    // Determine redirect URL
+    // Determine redirect URL first (before database operations)
     const redirectUrl = reviewRequest.businesses.google_review_url || 
                        reviewRequest.review_url || 
                        reviewRequest.businesses.website ||
                        'https://google.com/maps';
+    
+    // For maximum speed: do database tracking async (non-blocking)
+    const trackingPromise = (async () => {
+      try {
+        if (isFirstClick) {
+          await prisma.$transaction(async (tx) => {
+            // Update review request with click information
+            await tx.reviewRequest.update({
+              where: { id: reviewRequest.id },
+              data: {
+                clicked_at: new Date(),
+                status: 'CLICKED',
+                click_metadata: {
+                  userAgent,
+                  ipAddress,
+                  referer,
+                  timestamp: new Date().toISOString(),
+                  trackingServer: true,
+                  responseTime: Date.now() - startTime
+                },
+              },
+            });
+
+            // Create click event
+            await tx.event.create({
+              data: {
+                business_id: reviewRequest.business_id,
+                review_request_id: reviewRequest.id,
+                type: 'REQUEST_CLICKED',
+                source: 'tracking_server',
+                description: `Review link clicked by ${reviewRequest.customers.first_name} ${reviewRequest.customers.last_name}`,
+                metadata: {
+                  trackingUuid: uuid,
+                  customerEmail: reviewRequest.customers.email,
+                  userAgent,
+                  ipAddress,
+                  referer,
+                  trackingServer: true,
+                  isFirstClick: true
+                },
+              },
+            });
+          });
+
+          logger.info('✅ First click tracked successfully', {
+            requestId: reviewRequest.id,
+            customerId: reviewRequest.customer_id,
+            businessId: reviewRequest.business_id,
+            responseTime: Date.now() - startTime
+          });
+        } else {
+          // Log repeat click
+          logger.info('🔄 Repeat click detected', {
+            requestId: reviewRequest.id,
+            previousClickAt: reviewRequest.clicked_at,
+          });
+
+          // Still create an event for repeat clicks
+          await prisma.event.create({
+            data: {
+              business_id: reviewRequest.business_id,
+              review_request_id: reviewRequest.id,
+              type: 'REQUEST_CLICKED',
+              source: 'tracking_server',
+              description: `Repeat click by ${reviewRequest.customers.first_name} ${reviewRequest.customers.last_name}`,
+              metadata: {
+                trackingUuid: uuid,
+                repeatClick: true,
+                previousClickAt: reviewRequest.clicked_at,
+                userAgent,
+                ipAddress,
+                referer,
+                trackingServer: true,
+                isFirstClick: false
+              },
+            },
+          });
+        }
+      } catch (trackingError) {
+        logger.error('Tracking failed but continuing with redirect', { 
+          error: trackingError.message,
+          uuid
+        });
+      }
+    })();
+    
+    // Don't await the tracking - let it run in background
 
     // Log the redirect
     logger.info('🔗 Redirecting to review URL', {
@@ -252,7 +264,16 @@ app.get('/:uuid', async (req, res) => {
       totalResponseTime: Date.now() - startTime
     });
 
-    // Generate and send redirect page
+    // For fastest redirect, check if user agent indicates a bot/crawler
+    const userAgent = req.get('User-Agent') || '';
+    const isBot = /bot|crawler|spider|crawling/i.test(userAgent);
+    
+    // For bots or if query param requests instant redirect, skip the loading page
+    if (isBot || req.query.instant === 'true') {
+      return res.redirect(302, redirectUrl);
+    }
+    
+    // Generate and send redirect page with faster redirect timing
     const redirectPage = generateRedirectPage(
       reviewRequest.businesses.name,
       redirectUrl,
@@ -261,6 +282,7 @@ app.get('/:uuid', async (req, res) => {
     );
 
     res.set('Content-Type', 'text/html');
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     return res.status(200).send(redirectPage);
 
   } catch (error) {
@@ -390,7 +412,9 @@ function generateRedirectPage(businessName, redirectUrl, customerName, isFirstCl
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>Redirecting to ${businessName} Reviews</title>
-      <meta http-equiv="refresh" content="2;url=${redirectUrl}">
+      <meta http-equiv="refresh" content="0.5;url=${redirectUrl}">
+      <link rel="preconnect" href="${new URL(redirectUrl).origin}">
+      <link rel="dns-prefetch" href="${new URL(redirectUrl).origin}">
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -521,13 +545,20 @@ function generateRedirectPage(businessName, redirectUrl, customerName, isFirstCl
       </div>
       
       <script>
-        // Backup JavaScript redirect
+        // Immediate redirect - no delay
         setTimeout(function() {
-          window.location.href = '${redirectUrl}';
-        }, 2000);
+          window.location.replace('${redirectUrl}');
+        }, 100);
+        
+        // Backup redirect in case first one fails
+        setTimeout(function() {
+          if (document.visibilityState === 'visible') {
+            window.location.href = '${redirectUrl}';
+          }
+        }, 300);
         
         // Track page load
-        console.log('Review Runner Tracking: Page loaded for ${customerName}');
+        console.log('Review Runner Tracking: Fast redirect for ${customerName}');
       </script>
     </body>
     </html>
